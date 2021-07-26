@@ -32,6 +32,9 @@ def main(args=None):
     parser.add_argument('--depth', help='Resnet depth, must be one of 18, 34, 50, 101, 152', type=int, default=50)
     parser.add_argument('--epochs', help='Number of epochs', type=int, default=100)
 
+    parser.add_argument('--model', help='Model weights')
+    parser.add_argument('--starting_epoch', help='Starting epoch', type=int, default=0)
+
     parser = parser.parse_args(args)
 
     # Create the data loaders
@@ -74,7 +77,9 @@ def main(args=None):
         dataloader_val = DataLoader(dataset_val, num_workers=3, collate_fn=collater, batch_sampler=sampler_val)
 
     # Create the model
-    if parser.depth == 18:
+    if parser.model:
+        retinanet = torch.load(parser.model)
+    elif parser.depth == 18:
         retinanet = model.resnet18(num_classes=dataset_train.num_classes(), pretrained=True)
     elif parser.depth == 34:
         retinanet = model.resnet34(num_classes=dataset_train.num_classes(), pretrained=True)
@@ -111,7 +116,7 @@ def main(args=None):
 
     print('Num training images: {}'.format(len(dataset_train)))
 
-    for epoch_num in range(parser.epochs):
+    for epoch_num in range(parser.starting_epoch, parser.starting_epoch + parser.epochs):
 
         retinanet.train()
         retinanet.module.freeze_bn()
