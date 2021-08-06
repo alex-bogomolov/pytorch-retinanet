@@ -206,7 +206,7 @@ class CSVDataset(Dataset):
         annot = self.load_annotations(idx)
         scale = self.load_scale(idx)
 
-        sample = {'img': img, 'annot': annot, 'scale': scale}
+        sample = {'img': img, 'annot': annot, 'scale': scale, 'img_path': self.image_names[idx]}
         if self.transform:
             sample = self.transform(sample)
 
@@ -310,6 +310,7 @@ def collater(data):
     imgs = [s['img'] for s in data]
     annots = [s['annot'] for s in data]
     scales = [s['scale'] for s in data]
+    img_paths = [s['img_path'] for s in data]
         
     widths = [int(s.shape[0]) for s in imgs]
     heights = [int(s.shape[1]) for s in imgs]
@@ -341,13 +342,13 @@ def collater(data):
 
     padded_imgs = padded_imgs.permute(0, 3, 1, 2)
 
-    return {'img': padded_imgs, 'annot': annot_padded, 'scale': scales}
+    return {'img': padded_imgs, 'annot': annot_padded, 'scale': scales, 'img_path': img_paths}
 
 class Resizer(object):
     """Convert ndarrays in sample to Tensors."""
 
     def __call__(self, sample, min_side=608, max_side=1024):
-        image, annots, scale = sample['img'], sample['annot'], sample['scale']
+        image, annots, scale, img_path = sample['img'], sample['annot'], sample['scale'], sample['img_path']
 
         rows, cols, cns = image.shape
 
@@ -359,7 +360,7 @@ class Resizer(object):
 
         annots[:, :4] *= scale
 
-        return {'img': torch.from_numpy(new_image), 'annot': torch.from_numpy(annots), 'scale': scale}
+        return {'img': torch.from_numpy(new_image), 'annot': torch.from_numpy(annots), 'scale': scale, 'img_path': img_path}
 
 
 class Augmenter(object):
@@ -368,7 +369,7 @@ class Augmenter(object):
     def __call__(self, sample, flip_x=0.5):
 
         if np.random.rand() < flip_x:
-            image, annots, scale = sample['img'], sample['annot'], sample['scale']
+            image, annots, scale, img_path = sample['img'], sample['annot'], sample['scale'], sample['img_path']
             image = image[:, ::-1, :]
 
             rows, cols, channels = image.shape
@@ -381,7 +382,7 @@ class Augmenter(object):
             annots[:, 0] = cols - x2
             annots[:, 2] = cols - x_tmp
 
-            sample = {'img': image, 'annot': annots, 'scale': scale}
+            sample = {'img': image, 'annot': annots, 'scale': scale, 'img_path': img_path}
 
         return sample
 
@@ -394,9 +395,9 @@ class Normalizer(object):
 
     def __call__(self, sample):
 
-        image, annots, scale = sample['img'], sample['annot'], sample['scale']
+        image, annots, scale, img_path = sample['img'], sample['annot'], sample['scale'], sample['img_path']
 
-        return {'img':((image.astype(np.float32)-self.mean)/self.std), 'annot': annots, 'scale': scale}
+        return {'img':((image.astype(np.float32)-self.mean)/self.std), 'annot': annots, 'scale': scale, 'img_path': img_path}
 
 class UnNormalizer(object):
     def __init__(self, mean=None, std=None):
