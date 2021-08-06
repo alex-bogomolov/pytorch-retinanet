@@ -36,6 +36,7 @@ def main(args=None):
     parser.add_argument('--model', help='Model weights')
     parser.add_argument('--starting_epoch', help='Starting epoch', type=int, default=0)
     parser.add_argument('--batch_size', help='Batch Size', type=int, default=4)
+    parser.add_argument('--validation_frequency', help='Validation frequency', type=int, default=8)
 
     parser = parser.parse_args(args)
 
@@ -125,6 +126,8 @@ def main(args=None):
 
         epoch_loss = []
 
+        validation_step = len(dataloader_train) // parser.validation_frequency
+
         for iter_num, data in enumerate(dataloader_train):
             try:
                 optimizer.zero_grad()
@@ -153,11 +156,16 @@ def main(args=None):
                 epoch_loss.append(float(loss))
 
                 print(
-                    'Epoch: {} | Iteration: {} | Classification loss: {:1.5f} | Regression loss: {:1.5f} | Running loss: {:1.5f}'.format(
-                        epoch_num, iter_num, float(classification_loss), float(regression_loss), np.mean(loss_hist)))
+                    'Epoch: {} | Iteration: {} ({:.2f}) | Classification loss: {:1.5f} | Regression loss: {:1.5f} | Running loss: {:1.5f}'.format(
+                        epoch_num, iter_num, iter_num / len(dataloader_train) * 100, float(classification_loss), float(regression_loss), np.mean(loss_hist)))
 
                 del classification_loss
                 del regression_loss
+
+                if (iter_num + 1) % validation_step == 0:
+                    print('Evaluating dataset')
+                    csv_eval.evaluate(dataset_val, retinanet)
+
             except Exception as e:
                 print(e)
                 continue
