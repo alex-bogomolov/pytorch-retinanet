@@ -16,6 +16,7 @@ import skimage.io
 import skimage.transform
 import skimage.color
 import skimage
+from future.utils import raise_from
 
 from PIL import Image
 
@@ -203,19 +204,22 @@ class CSVDataset(Dataset):
 
         img = self.load_image(idx)
         annot = self.load_annotations(idx)
-        sample = {'img': img, 'annot': annot}
+        scale = self.load_scale(idx)
+
+        sample = {'img': img, 'annot': annot, 'scale': scale}
         if self.transform:
             sample = self.transform(sample)
 
         return sample
 
     def load_image(self, image_index):
-        img = skimage.io.imread(self.image_names[image_index])
+        img = np.load(self.image_names[image_index])
 
-        if len(img.shape) == 2:
-            img = skimage.color.gray2rgb(img)
+        return img
 
-        return img.astype(np.float32)/255.0
+    def load_scale(self, image_index):
+        annotation_list = self.image_data[self.image_names[image_index]]
+        return annotation_list[0]['scale']
 
     def load_annotations(self, image_index):
         # get ground truth annotations
@@ -223,11 +227,11 @@ class CSVDataset(Dataset):
         annotations     = np.zeros((0, 5))
 
         # some images appear to miss annotations (like image with id 257034)
-        if len(annotation_list) == 0:
-            return annotations
 
         # parse annotations
         for idx, a in enumerate(annotation_list):
+            if not 'x1' in a:
+                break
             # some annotations have basically no width / height, skip them
             x1 = a['x1']
             x2 = a['x2']
@@ -255,15 +259,17 @@ class CSVDataset(Dataset):
             line += 1
 
             try:
-                img_file, x1, y1, x2, y2, class_name = row[:6]
+                img_file, x1, y1, x2, y2, class_name, scale = row[:7]
             except ValueError:
                 raise_from(ValueError('line {}: format should be \'img_file,x1,y1,x2,y2,class_name\' or \'img_file,,,,,\''.format(line)), None)
 
             if img_file not in result:
                 result[img_file] = []
 
+            scale = float(scale)
             # If a row contains only an image path, it's an image without annotations.
             if (x1, y1, x2, y2, class_name) == ('', '', '', '', ''):
+                result[img_file].append({'scale': scale})
                 continue
 
             x1 = self._parse(x1, int, 'line {}: malformed x1: {{}}'.format(line))
@@ -281,7 +287,7 @@ class CSVDataset(Dataset):
             if class_name not in classes:
                 raise ValueError('line {}: unknown class name: \'{}\' (classes: {})'.format(line, class_name, classes))
 
-            result[img_file].append({'x1': x1, 'x2': x2, 'y1': y1, 'y2': y2, 'class': class_name})
+            result[img_file].append({'x1': x1, 'x2': x2, 'y1': y1, 'y2': y2, 'class': class_name, 'scale': scale})
         return result
 
     def name_to_label(self, name):
@@ -294,8 +300,9 @@ class CSVDataset(Dataset):
         return max(self.classes.values()) + 1
 
     def image_aspect_ratio(self, image_index):
-        image = Image.open(self.image_names[image_index])
-        return float(image.width) / float(image.height)
+        image = np.load(self.image_names[image_index])
+        height, width, _ = image.shape
+        return float(width) / float(height)
 
 
 def collater(data):
@@ -340,24 +347,8 @@ class Resizer(object):
     """Convert ndarrays in sample to Tensors."""
 
     def __call__(self, sample, min_side=608, max_side=1024):
-        image, annots = sample['img'], sample['annot']
+        image, annots, scale = sample['img'], sample['annot'], sample['scale']
 
-        rows, cols, cns = image.shape
-
-        smallest_side = min(rows, cols)
-
-        # rescale the image so the smallest side is min_side
-        scale = min_side / smallest_side
-
-        # check if the largest side is now greater than max_side, which can happen
-        # when images have a large aspect ratio
-        largest_side = max(rows, cols)
-
-        if largest_side * scale > max_side:
-            scale = max_side / largest_side
-
-        # resize the image with the computed scale
-        image = skimage.transform.resize(image, (int(round(rows*scale)), int(round((cols*scale)))))
         rows, cols, cns = image.shape
 
         pad_w = 32 - rows%32
@@ -377,7 +368,7 @@ class Augmenter(object):
     def __call__(self, sample, flip_x=0.5):
 
         if np.random.rand() < flip_x:
-            image, annots = sample['img'], sample['annot']
+            image, annots, scale = sample['img'], sample['annot'], sample['scale']
             image = image[:, ::-1, :]
 
             rows, cols, channels = image.shape
@@ -390,7 +381,7 @@ class Augmenter(object):
             annots[:, 0] = cols - x2
             annots[:, 2] = cols - x_tmp
 
-            sample = {'img': image, 'annot': annots}
+            sample = {'img': image, 'annot': annots, 'scale': scale}
 
         return sample
 
@@ -403,9 +394,9 @@ class Normalizer(object):
 
     def __call__(self, sample):
 
-        image, annots = sample['img'], sample['annot']
+        image, annots, scale = sample['img'], sample['annot'], sample['scale']
 
-        return {'img':((image.astype(np.float32)-self.mean)/self.std), 'annot': annots}
+        return {'img':((image.astype(np.float32)-self.mean)/self.std), 'annot': annots, 'scale': scale}
 
 class UnNormalizer(object):
     def __init__(self, mean=None, std=None):
